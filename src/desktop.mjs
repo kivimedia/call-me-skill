@@ -38,6 +38,78 @@ export function getCurrentDesktop() {
   }
 }
 
+/**
+ * Find the HWND of a window whose title contains `pattern` (case-insensitive
+ * substring match). Returns the most-recently-active match, or 0 if none.
+ *
+ * Built-in aliases for common targets:
+ *   'vscode' | 'code'  -> 'Visual Studio Code'
+ *   'cursor'           -> 'Cursor'
+ *   'chrome'           -> 'Google Chrome'
+ *   'edge'             -> 'Microsoft‐ Edge'
+ *   'firefox'          -> 'Firefox'
+ *   'terminal'         -> 'Terminal'
+ *   'foreground'       -> current foreground window (returns getForegroundWindowHandle())
+ */
+const FOCUS_ALIASES = {
+  vscode: 'Visual Studio Code',
+  code: 'Visual Studio Code',
+  cursor: 'Cursor',
+  antigravity: 'PR team',
+  claude: 'PR team',
+  chrome: 'Google Chrome',
+  edge: 'Edge',
+  firefox: 'Firefox',
+  terminal: 'Terminal',
+};
+
+export function findWindowHandle(pattern) {
+  if (!pattern) return 0;
+  if (pattern.toLowerCase() === 'foreground') return getForegroundWindowHandle();
+  const target = (FOCUS_ALIASES[pattern.toLowerCase()] || pattern).toLowerCase();
+  const ps = `
+Add-Type @"
+using System;
+using System.Text;
+using System.Collections.Generic;
+using System.Runtime.InteropServices;
+public class WF {
+  public delegate bool EnumProc(IntPtr h, IntPtr l);
+  [DllImport("user32.dll")] public static extern bool EnumWindows(EnumProc cb, IntPtr l);
+  [DllImport("user32.dll")] public static extern int GetWindowTextLength(IntPtr h);
+  [DllImport("user32.dll", CharSet=CharSet.Unicode)] public static extern int GetWindowText(IntPtr h, StringBuilder s, int n);
+  [DllImport("user32.dll")] public static extern bool IsWindowVisible(IntPtr h);
+  public static List<IntPtr> Find(string needle) {
+    var hits = new List<IntPtr>();
+    EnumWindows((h, l) => {
+      if (!IsWindowVisible(h)) return true;
+      int len = GetWindowTextLength(h);
+      if (len <= 0) return true;
+      var sb = new StringBuilder(len + 1);
+      GetWindowText(h, sb, sb.Capacity);
+      if (sb.ToString().ToLower().Contains(needle)) hits.Add(h);
+      return true;
+    }, IntPtr.Zero);
+    return hits;
+  }
+}
+"@
+$hits = [WF]::Find('${target.replace(/'/g, "''")}')
+if ($hits.Count -gt 0) { $hits[0].ToInt64() } else { 0 }
+`;
+  try {
+    const out = execFileSync(
+      'powershell.exe',
+      ['-NoProfile', '-NonInteractive', '-Command', ps],
+      { encoding: 'utf8', timeout: 5000 }
+    );
+    const n = parseInt(out.trim(), 10);
+    return Number.isFinite(n) ? n : 0;
+  } catch {
+    return 0;
+  }
+}
+
 export function getForegroundWindowHandle() {
   try {
     const out = execFileSync(

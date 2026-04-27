@@ -37,6 +37,9 @@ Usage:
 Speak options:
   --length short|medium|long           Override configured sentence length
   --no-intro                           Skip the intro music
+  --focus <pattern|alias>              Window for hotkey to foreground (default: foreground at speak time)
+                                       Aliases: vscode, cursor, chrome, edge, firefox, terminal
+                                       Or any substring of a window title.
 
 Daemon hotkey (after 'daemon start'):
   Win+Ctrl+J  (or fallback)            Jump to desktop + window of the last call
@@ -77,6 +80,7 @@ async function main() {
         const a = rest[i];
         if (a === '--length') opts.length = rest[++i];
         else if (a === '--no-intro') opts.noIntro = true;
+        else if (a === '--focus') opts.focus = rest[++i];
         else positional.push(a);
       }
       const message = positional.join(' ').trim();

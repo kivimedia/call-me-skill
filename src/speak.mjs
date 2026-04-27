@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import { loadConfig, loadEnv } from './config.mjs';
 import { compose } from './compose.mjs';
 import { tts } from './voice.mjs';
-import { getCurrentDesktop, getForegroundWindowHandle } from './desktop.mjs';
+import { getCurrentDesktop, getForegroundWindowHandle, findWindowHandle } from './desktop.mjs';
 import { playSequence } from './play.mjs';
 import { INTROS_DIR, LAST_CALL_FILE, ensureConfigDir } from './paths.mjs';
 
@@ -16,6 +16,9 @@ import { INTROS_DIR, LAST_CALL_FILE, ensureConfigDir } from './paths.mjs';
  * @param {object} [opts]
  * @param {string} [opts.length] - short|medium|long override
  * @param {boolean} [opts.noIntro=false]
+ * @param {string} [opts.focus] - window title pattern OR alias (vscode|cursor|chrome|edge|firefox|terminal|foreground).
+ *   Default: foreground window at speak() time. The daemon's hotkey
+ *   (Win+Ctrl+J) foregrounds whichever HWND is saved here.
  */
 export async function speak(message, opts = {}) {
   const cfg = loadConfig();
@@ -34,14 +37,26 @@ export async function speak(message, opts = {}) {
   const desktop = getCurrentDesktop();
   const sentence = compose(cfg, message, desktop.index, { lengthOverride: opts.length });
 
-  // Save last-call state for the daemon's double-Ctrl jump.
+  // Save last-call state for the daemon hotkey.
+  // window_handle: target for SetForegroundWindow when user hits the hotkey.
+  //   If --focus is provided, resolve to that window (e.g. VS Code, Chrome).
+  //   Falls back to current foreground if the focus pattern matches nothing.
+  let hwnd = 0;
+  let focusUsed = 'foreground';
+  if (opts.focus) {
+    hwnd = findWindowHandle(opts.focus);
+    focusUsed = hwnd ? `match for "${opts.focus}"` : `"${opts.focus}" not found, using foreground`;
+  }
+  if (!hwnd) hwnd = getForegroundWindowHandle();
+
   ensureConfigDir();
   writeFileSync(
     LAST_CALL_FILE,
     JSON.stringify(
       {
         desktop_index: desktop.index,
-        window_handle: getForegroundWindowHandle(),
+        window_handle: hwnd,
+        focus_used: focusUsed,
         sentence,
         timestamp: new Date().toISOString(),
       },
