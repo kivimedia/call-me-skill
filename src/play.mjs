@@ -20,11 +20,13 @@ function buildPlaybackPS(items) {
     const alias = `cms${i}`;
     const psPath = escapeForPS(it.path);
     if (it.maxMs && it.maxMs > 0) {
-      // Use 'play X to N': mpegvideo device uses ms by default.
+      // mci's "play to N" timing has been unreliable in practice. Use
+      // async play + explicit Start-Sleep for deterministic capping.
       return `
 $null = [W.MCI]::mciSendString('open "${psPath}" alias ${alias}', $null, 0, [IntPtr]::Zero)
-$null = [W.MCI]::mciSendString('set ${alias} time format milliseconds', $null, 0, [IntPtr]::Zero)
-$null = [W.MCI]::mciSendString('play ${alias} from 0 to ${Math.floor(it.maxMs)} wait', $null, 0, [IntPtr]::Zero)
+$null = [W.MCI]::mciSendString('play ${alias}', $null, 0, [IntPtr]::Zero)
+Start-Sleep -Milliseconds ${Math.floor(it.maxMs)}
+$null = [W.MCI]::mciSendString('stop ${alias}', $null, 0, [IntPtr]::Zero)
 $null = [W.MCI]::mciSendString('close ${alias}', $null, 0, [IntPtr]::Zero)
 `;
     }
