@@ -131,12 +131,23 @@ class Daemon {
       SendInput((uint)seq.Length, seq, Marshal.SizeOf(typeof(INPUT)));
       System.Threading.Thread.Sleep(200 + steps * 60);
     }
-    if (hwnd != 0) {
-      var h = new IntPtr(hwnd);
-      if (IsIconic(h)) ShowWindow(h, 9);
-      SetForegroundWindow(h);
-    }
+    if (hwnd != 0) ForegroundWithFocusUnlock(hwnd);
     Log("jumped: desktop " + cur + " -> " + target + " (steps=" + steps + "), hwnd=" + hwnd);
+  }
+
+  // SetForegroundWindow alone is blocked by Windows' foreground-stealing
+  // protection unless the calling process owns the current foreground.
+  // The widely-used workaround: simulate an Alt key tap right before
+  // SetForegroundWindow. Windows then grants this process foreground
+  // rights for ~200ms, long enough for the call to succeed.
+  // See: https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-setforegroundwindow#remarks
+  static void ForegroundWithFocusUnlock(long hwnd) {
+    var h = new IntPtr(hwnd);
+    if (IsIconic(h)) ShowWindow(h, 9); // SW_RESTORE
+    // Alt key tap to unlock foreground stealing.
+    var alt = new INPUT[] { KeyDown(0x12), KeyUp(0x12) };
+    SendInput((uint)alt.Length, alt, Marshal.SizeOf(typeof(INPUT)));
+    SetForegroundWindow(h);
   }
 
   // ---- Last-call.json minimal parser (avoids JSON.NET dependency) ----
