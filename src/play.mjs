@@ -1,56 +1,32 @@
-// Cross-platform audio playback. Windows: PowerShell + System.Windows.Media.MediaPlayer.
-// playSequence is sync (blocks). playAsync returns a handle you can cancel
-// for interactive auditioning.
+// Audio playback via Windows Multimedia (winmm.dll mciSendString).
 //
-// Why the seemingly elaborate Open-then-wait dance: MediaPlayer.Open() is async.
-// NaturalDuration is invalid until MediaOpened fires. The previous version
-// polled NaturalDuration in a tight loop after Play() and frequently fell
-// through to the maxSecondsEach fallback (causing several seconds of dead
-// air between intro and TTS). Now we wait for MediaOpened explicitly, then
-// sleep exactly the clip's duration + a tiny grace.
+// Why not MediaPlayer (System.Windows.Media): events like MediaOpened need a
+// WPF Dispatcher / message pump, which PowerShell -Command scripts don't run.
+// Without it, NaturalDuration never populates and we end up sleeping the full
+// fallback per clip - causing seconds of dead air between intro and TTS.
+//
+// mciSendString with the `wait` flag is synchronous - returns only when
+// playback completes. No events, no polling, no guesswork. Native MP3
+// support since Windows XP via the `mpegvideo` device type.
 import { spawnSync, spawn } from 'node:child_process';
 
-function buildPlaybackPS(urls, maxSecondsEach) {
-  const arr = `@(${urls.join(',')})`;
+function buildPlaybackPS(paths) {
+  // Build a PS script that opens, plays-with-wait, closes each file in turn.
+  // Aliases are cms0, cms1, cms2... so they don't collide with anything else.
+  const psPaths = paths.map((p) => p.replace(/\\/g, '\\\\').replace(/`/g, '``').replace(/"/g, '\\"'));
+  const lines = psPaths.map((p, i) => {
+    const alias = `cms${i}`;
+    return `
+$null = [W.MCI]::mciSendString('open "${p}" alias ${alias}', $null, 0, [IntPtr]::Zero)
+$null = [W.MCI]::mciSendString('play ${alias} wait', $null, 0, [IntPtr]::Zero)
+$null = [W.MCI]::mciSendString('close ${alias}', $null, 0, [IntPtr]::Zero)
+`;
+  }).join('');
   return `
 $ErrorActionPreference = 'SilentlyContinue'
-Add-Type -AssemblyName presentationCore
-foreach ($u in ${arr}) {
-  $p = New-Object System.Windows.Media.MediaPlayer
-  $opened = $false
-  $duration = $null
-  $p.add_MediaOpened({
-    $script:opened = $true
-    if ($p.NaturalDuration.HasTimeSpan) { $script:duration = $p.NaturalDuration.TimeSpan }
-  })
-  $p.Open([uri]$u)
-  $p.Volume = 1.0
-  # Wait for MediaOpened (max 1.5s).
-  $w = 0
-  while (-not $script:opened -and $w -lt 1500) {
-    Start-Sleep -Milliseconds 30
-    $w += 30
-  }
-  $p.Play()
-  if ($script:duration) {
-    Start-Sleep -Milliseconds ([int]($script:duration.TotalMilliseconds + 80))
-  } else {
-    # Couldn't read duration - poll briefly then fall back.
-    $waited = 0
-    while ($waited -lt ${maxSecondsEach * 1000}) {
-      Start-Sleep -Milliseconds 100
-      $waited += 100
-      if ($p.NaturalDuration.HasTimeSpan -and $p.Position -ge $p.NaturalDuration.TimeSpan) { break }
-    }
-  }
-  $p.Stop()
-  $p.Close()
-}
+Add-Type -Name MCI -Namespace W -MemberDefinition '[System.Runtime.InteropServices.DllImport("winmm.dll", CharSet = System.Runtime.InteropServices.CharSet.Auto)] public static extern int mciSendString(string command, System.Text.StringBuilder buffer, int bufferSize, System.IntPtr hWndCallback);'
+${lines}
 `;
-}
-
-function escapeUri(p) {
-  return `'file:///${p.replace(/\\/g, '/').replace(/'/g, "''")}'`;
 }
 
 /**
@@ -58,17 +34,16 @@ function escapeUri(p) {
  *
  * @param {string[]} paths - Absolute file paths
  * @param {object} [opts]
- * @param {number} [opts.maxSecondsEach=12] - Per-file fallback wait when
- *   NaturalDuration can't be read (rare).
+ * @param {number} [opts.maxSecondsTotal=60] - Hard timeout for the whole queue
+ *   in case a file is corrupt and mci hangs.
  */
 export function playSequence(paths, opts = {}) {
   if (!paths || paths.length === 0) return;
-  const max = Math.min(opts.maxSecondsEach ?? 12, 30);
-  const urls = paths.map(escapeUri);
+  const max = Math.min(opts.maxSecondsTotal ?? 60, 120);
   spawnSync(
     'powershell.exe',
-    ['-NoProfile', '-NonInteractive', '-Command', buildPlaybackPS(urls, max)],
-    { stdio: 'ignore', timeout: (max * paths.length + 5) * 1000 }
+    ['-NoProfile', '-NonInteractive', '-Command', buildPlaybackPS(paths)],
+    { stdio: 'ignore', timeout: max * 1000 }
   );
 }
 
@@ -77,11 +52,10 @@ export function playSequence(paths, opts = {}) {
  * an interactive picker can stop playback when the user moves to the next
  * item. Used by the wizard for intro + voice auditioning.
  */
-export function playAsync(path, opts = {}) {
-  const max = Math.min(opts.maxSeconds ?? 8, 30);
+export function playAsync(path) {
   const child = spawn(
     'powershell.exe',
-    ['-NoProfile', '-NonInteractive', '-Command', buildPlaybackPS([escapeUri(path)], max)],
+    ['-NoProfile', '-NonInteractive', '-Command', buildPlaybackPS([path])],
     { stdio: 'ignore', windowsHide: true }
   );
   return {

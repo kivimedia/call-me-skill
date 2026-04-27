@@ -8,16 +8,35 @@ import { readFileSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { TEMPLATES_DIR } from './paths.mjs';
 
+// Each cell is an array; compose() picks one at random per call so the
+// addressing varies. 10 options per gender pairing, mix of warm / royal /
+// playful / swagger / classic.
 const ADDRESS_BY_GENDER = {
-  male: { he: 'my man', she: 'my dear', they: 'my friend' },
-  female: { he: 'your highness', she: 'my queen', they: 'your highness' },
-  neutral: { he: 'friend', she: 'friend', they: 'friend' },
+  male: {
+    he: ['my man', 'champ', 'boss', 'legend', 'captain', 'ace', 'king', 'partner', 'maestro', 'chief'],
+    she: ['my dear', 'darling', 'queen', 'champ', 'star', 'rockstar', 'boss', 'gem', 'badass', 'hero'],
+    they: ['friend', 'pal', 'buddy', 'compadre', 'champ', 'rockstar', 'partner', 'ace', 'maestro', 'legend'],
+  },
+  female: {
+    he: ['your highness', 'your majesty', 'sire', 'my lord', 'champion', 'maestro', 'mastermind', 'boss', 'commander', 'chief'],
+    she: ['my queen', 'your majesty', 'your grace', 'milady', 'queen bee', 'icon', 'goddess', 'powerhouse', 'superstar', 'darling'],
+    they: ['my friend', 'darling', 'rockstar', 'superstar', 'champion', 'legend', 'icon', 'boss', 'powerhouse', 'maestro'],
+  },
+  neutral: {
+    he: ['friend', 'pal', 'buddy', 'compadre', 'partner', 'companion', 'comrade', 'mate', 'kin', 'sidekick'],
+    she: ['friend', 'pal', 'buddy', 'compadre', 'partner', 'companion', 'comrade', 'mate', 'kin', 'sidekick'],
+    they: ['friend', 'pal', 'buddy', 'compadre', 'partner', 'companion', 'comrade', 'mate', 'kin', 'sidekick'],
+  },
 };
+
+function pickRandom(arr) {
+  return Array.isArray(arr) ? arr[Math.floor(Math.random() * arr.length)] : arr;
+}
 
 function pickAddress(helperGender, userGender) {
   const map = ADDRESS_BY_GENDER[helperGender] || ADDRESS_BY_GENDER.neutral;
   const key = userGender?.startsWith('he') ? 'he' : userGender?.startsWith('she') ? 'she' : 'they';
-  return map[key];
+  return pickRandom(map[key]);
 }
 
 function loadTemplates(helperGender, length) {
