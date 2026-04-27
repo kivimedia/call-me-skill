@@ -10,7 +10,7 @@ import { TEMPLATES_DIR } from './paths.mjs';
 
 const ADDRESS_BY_GENDER = {
   male: { he: 'my man', she: 'my dear', they: 'my friend' },
-  female: { he: 'sir', she: 'love', they: 'friend' },
+  female: { he: 'your highness', she: 'my queen', they: 'your highness' },
   neutral: { he: 'friend', she: 'friend', they: 'friend' },
 };
 

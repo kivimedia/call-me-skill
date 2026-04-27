@@ -125,7 +125,7 @@ export async function runSetup() {
     default: existing?.helper_gender || 'male',
     choices: [
       { name: 'male  - addressing: "my man", "buddy"', value: 'male' },
-      { name: 'female - addressing: "my dear", "love"', value: 'female' },
+      { name: 'female - addressing: "my queen", "your highness"', value: 'female' },
       { name: 'neutral - addressing: "friend"',         value: 'neutral' },
     ],
   });
