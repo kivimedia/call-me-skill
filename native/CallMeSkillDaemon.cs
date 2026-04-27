@@ -54,15 +54,17 @@ class Daemon {
   const ushort VK_J = 0x4A, VK_K = 0x4B, VK_L = 0x4C;
 
   // ---- Logging ----
-  static string LogFile;
+  // Always writes to Console.Out. When started via daemon-cli.mjs, Node
+  // redirects stdout to daemon.log. When run directly for debugging, you
+  // see it in the console.
   static void Log(string msg) {
     try {
-      File.AppendAllText(LogFile, "[" + DateTime.UtcNow.ToString("o") + "] " + msg + "\n");
+      Console.Out.WriteLine("[" + DateTime.UtcNow.ToString("o") + "] " + msg);
+      Console.Out.Flush();
     } catch { }
   }
 
   // ---- Config / paths ----
-  static string ConfigDir;
   static string LastCallFile;
 
   // ---- Hotkey candidates: first that registers wins ----
@@ -167,10 +169,9 @@ class Daemon {
 
   static int Main(string[] args) {
     string home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
-    ConfigDir = Path.Combine(home, ".config", "call-me-skill");
-    LogFile = Path.Combine(ConfigDir, "daemon.log");
-    LastCallFile = Path.Combine(ConfigDir, "last-call.json");
-    try { Directory.CreateDirectory(ConfigDir); } catch { }
+    string configDir = Path.Combine(home, ".config", "call-me-skill");
+    LastCallFile = Path.Combine(configDir, "last-call.json");
+    try { Directory.CreateDirectory(configDir); } catch { }
 
     // Register hotkey (try fallbacks).
     string winning = null;
