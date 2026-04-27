@@ -1,29 +1,97 @@
-// First-run wizard. 8 questions + an intro audition + a test alert.
-import { existsSync, readdirSync } from 'node:fs';
+// First-run wizard. Arrow-key UI via @inquirer/prompts + a custom raw-mode
+// audition picker for sounds and voices.
+import { existsSync, readdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { createInterface } from 'node:readline/promises';
-import { stdin as input, stdout as output } from 'node:process';
+import { tmpdir } from 'node:os';
+import { input, password, select } from '@inquirer/prompts';
 import { saveConfig, saveEnv, loadConfig, loadEnv } from './config.mjs';
-import { listVoices } from './voice.mjs';
-import { playSequence } from './play.mjs';
+import { listVoices, tts } from './voice.mjs';
+import { playAsync } from './play.mjs';
 import { speak } from './speak.mjs';
+import { arrowPick } from './picker.mjs';
 import { INTROS_DIR, ENV_FILE, CONFIG_FILE } from './paths.mjs';
 
-async function ask(rl, q, { default: def, choices } = {}) {
-  let prompt = q;
-  if (choices) prompt += ` (${choices.join('/')})`;
-  if (def !== undefined) prompt += ` [${def}]`;
-  prompt += ': ';
-  while (true) {
-    const a = (await rl.question(prompt)).trim();
-    if (!a && def !== undefined) return def;
-    if (!a) continue;
-    if (choices && !choices.includes(a)) {
-      console.log(`  -> please pick one of: ${choices.join(', ')}`);
-      continue;
-    }
-    return a;
+const SAMPLE_TEXT = (name) => `Hi ${name}, I am your new helper.`;
+
+function filterVoicesForHelper(voices, helperGender) {
+  if (helperGender === 'neutral') return voices;
+  return voices.filter((v) => {
+    const g = (v.labels?.gender || '').toLowerCase();
+    return g === helperGender;
+  });
+}
+
+async function pickVoice(apiKey, voices, helperGender, name) {
+  let candidates = filterVoicesForHelper(voices, helperGender);
+  if (candidates.length === 0) {
+    console.log(`   (no ${helperGender} voices in your account - showing all)`);
+    candidates = voices;
   }
+  candidates = candidates.slice(0, 4);
+  if (candidates.length === 0) {
+    throw new Error('No voices available in your ElevenLabs account.');
+  }
+
+  console.log(`\n   Generating ${candidates.length} voice samples (one moment)...`);
+  const samples = [];
+  for (const v of candidates) {
+    process.stdout.write(`     - ${v.name}... `);
+    const bytes = await tts(apiKey, v.voice_id, SAMPLE_TEXT(name));
+    const path = join(tmpdir(), `cms-voice-${v.voice_id}.mp3`);
+    writeFileSync(path, bytes);
+    samples.push({ voice: v, path });
+    process.stdout.write('ok\n');
+  }
+
+  let currentPlay = null;
+  const items = samples.map((s) => ({
+    label: `${s.voice.name}${s.voice.labels?.accent ? ` (${s.voice.labels.accent})` : ''}`,
+    value: s,
+  }));
+  const result = await arrowPick({
+    items,
+    title: '\n6) Voice picker - left/right to audition each, Enter to pick',
+    onChange: (item) => {
+      if (currentPlay) currentPlay.cancel();
+      currentPlay = playAsync(item.value.path);
+    },
+    allowSkip: false,
+  });
+  if (currentPlay) currentPlay.cancel();
+  if (result.cancelled) throw new Error('cancelled at voice pick');
+  return result.value.voice;
+}
+
+async function pickIntro() {
+  if (!existsSync(INTROS_DIR)) {
+    console.log('\n7) Intro music: no bundled intros found, skipping.');
+    return 'none';
+  }
+  const files = readdirSync(INTROS_DIR)
+    .filter((f) => /^intro-\d{2}\.(mp3|wav)$/i.test(f))
+    .sort();
+  if (files.length === 0) {
+    console.log('\n7) Intro music: no bundled intros found, skipping.');
+    return 'none';
+  }
+  let currentPlay = null;
+  const items = files.map((f, i) => ({
+    label: f.replace(/\.(mp3|wav)$/i, ''),
+    value: i + 1,
+    path: join(INTROS_DIR, f),
+  }));
+  const result = await arrowPick({
+    items,
+    title: '\n7) Intro music - left/right to audition each, Enter to pick, s to skip',
+    onChange: (item) => {
+      if (currentPlay) currentPlay.cancel();
+      currentPlay = playAsync(item.path);
+    },
+    allowSkip: true,
+  });
+  if (currentPlay) currentPlay.cancel();
+  if (result.skipped || result.cancelled) return 'none';
+  return result.value;
 }
 
 export async function runSetup() {
@@ -32,136 +100,106 @@ export async function runSetup() {
   console.log(`Secrets -> ${ENV_FILE}\n`);
 
   const existing = loadConfig();
-  if (existing) {
-    console.log('Existing config found. Re-running will overwrite.');
+  if (existing) console.log('Existing config found - re-running will overwrite.\n');
+
+  // 1. Name
+  const name = await input({
+    message: '1) Your name',
+    default: existing?.name || 'friend',
+  });
+
+  // 2. Your gender (skip allowed)
+  const yourGender = await select({
+    message: '2) Your gender (used in complimentary phrasing)',
+    default: existing?.your_gender ?? '',
+    choices: [
+      { name: 'he/him', value: 'he/him' },
+      { name: 'she/her', value: 'she/her' },
+      { name: 'skip / prefer not to say', value: '' },
+    ],
+  });
+
+  // 3. Helper voice style (drives addressing AND filters voice candidates)
+  const helperGender = await select({
+    message: '3) Helper voice style',
+    default: existing?.helper_gender || 'male',
+    choices: [
+      { name: 'male  - addressing: "my man", "buddy"', value: 'male' },
+      { name: 'female - addressing: "my dear", "love"', value: 'female' },
+      { name: 'neutral - addressing: "friend"',         value: 'neutral' },
+    ],
+  });
+
+  // 4. Sentence length
+  const length = await select({
+    message: '4) Sentence length',
+    default: existing?.sentence_length || 'medium',
+    choices: [
+      { name: 'short  ("Ziv from desktop 2: build broke")', value: 'short' },
+      { name: 'medium ("Ziv, my man, calling from desktop 2: build broke")', value: 'medium' },
+      { name: 'long   (more elaborate phrasing)', value: 'long' },
+    ],
+  });
+
+  // 5. ElevenLabs API key (skip = keep existing)
+  const existingKey = loadEnv()?.ELEVENLABS_API_KEY || '';
+  let apiKey = existingKey;
+  const keyAnswer = await password({
+    message: existingKey
+      ? '5) ElevenLabs API key (press Enter to keep existing)'
+      : '5) ElevenLabs API key (https://elevenlabs.io/app/settings/api-keys)',
+    mask: '*',
+  });
+  if (keyAnswer) apiKey = keyAnswer.trim();
+  if (!apiKey) {
+    console.log('   -> ElevenLabs key required to continue. Aborting.');
+    return;
+  }
+  saveEnv({ ELEVENLABS_API_KEY: apiKey });
+
+  console.log('\n   Fetching voices from your ElevenLabs account...');
+  const voices = await listVoices(apiKey);
+  if (voices.length === 0) {
+    console.log('   -> no voices found. Add some in your ElevenLabs account, then re-run.');
+    return;
   }
 
-  const rl = createInterface({ input, output });
+  // 6. Voice audition (filtered by helper gender)
+  const voice = await pickVoice(apiKey, voices, helperGender, name);
+  console.log(`\n   -> picked voice: ${voice.name} (${voice.voice_id})`);
 
+  // 7. Intro music
+  const introIndex = await pickIntro();
+  console.log(`   -> intro: ${introIndex === 'none' ? 'none' : '#' + introIndex}`);
+
+  // Save config
+  const cfg = {
+    name,
+    your_gender: yourGender || 'they/them',
+    helper_gender: helperGender,
+    sentence_length: length,
+    intro_index: introIndex,
+    voice_id: voice.voice_id,
+    voice_name: voice.name,
+    version: 1,
+    saved_at: new Date().toISOString(),
+  };
+  saveConfig(cfg);
+
+  // 8. Test alert
+  console.log('\n8) Playing test alert...');
   try {
-    // 1. Name
-    const name = await ask(rl, '1) Your name', { default: existing?.name || 'friend' });
-
-    // 2. User gender
-    const yourGender = await ask(rl, '2) Your gender (for compliments)', {
-      default: existing?.your_gender || 'they/them',
-      choices: ['he/him', 'she/her', 'they/them'],
-    });
-
-    // 3. Helper gender
-    const helperGender = await ask(rl, '3) Helper gender (drives addressing style)', {
-      default: existing?.helper_gender || 'neutral',
-      choices: ['male', 'female', 'neutral'],
-    });
-
-    // 4. Sentence length
-    const length = await ask(rl, '4) Sentence length', {
-      default: existing?.sentence_length || 'medium',
-      choices: ['short', 'medium', 'long'],
-    });
-
-    // 5. Intro music
-    const introFiles = existsSync(INTROS_DIR)
-      ? readdirSync(INTROS_DIR)
-          .filter((f) => /^intro-\d{2}\.(wav|mp3)$/i.test(f))
-          .sort()
-      : [];
-    let introIndex = 'none';
-    if (introFiles.length === 0) {
-      console.log('   (no bundled intros found - skipping)');
-    } else {
-      console.log(`5) Intro music: ${introFiles.length} clips available.`);
-      console.log('   Type a number 1-' + introFiles.length + ' to audition (will play once).');
-      console.log('   Type "ok N" to pick clip N (e.g. "ok 3").');
-      console.log('   Type "none" to skip intro music.');
-      while (true) {
-        const a = (await rl.question('   > ')).trim().toLowerCase();
-        if (a === 'none' || a === '') {
-          introIndex = 'none';
-          break;
-        }
-        const okMatch = a.match(/^ok\s+(\d+)$/);
-        if (okMatch) {
-          const n = parseInt(okMatch[1], 10);
-          if (n >= 1 && n <= introFiles.length) {
-            introIndex = n;
-            console.log(`   -> picked intro #${n}`);
-            break;
-          }
-          console.log('   -> out of range');
-          continue;
-        }
-        const n = parseInt(a, 10);
-        if (n >= 1 && n <= introFiles.length) {
-          const file = introFiles[n - 1];
-          console.log(`   playing intro #${n} (${file})...`);
-          playSequence([join(INTROS_DIR, file)], { maxSecondsEach: 5 });
-          continue;
-        }
-        console.log('   -> didn\'t understand. number to audition, "ok N" to pick, "none" to skip');
-      }
-    }
-
-    // 6. ElevenLabs API key
-    let apiKey = (loadEnv()?.ELEVENLABS_API_KEY) || '';
-    const keyAnswer = await ask(rl, `6) ElevenLabs API key${apiKey ? ' (press enter to keep existing)' : ''}`, {
-      default: apiKey ? '__keep__' : undefined,
-    });
-    if (keyAnswer && keyAnswer !== '__keep__') apiKey = keyAnswer;
-    if (!apiKey) {
-      console.log('   -> ElevenLabs key required to continue.');
-      return;
-    }
-    saveEnv({ ELEVENLABS_API_KEY: apiKey });
-
-    // 7. Voice picker
-    console.log('7) Fetching voices from your ElevenLabs account...');
-    const voices = await listVoices(apiKey);
-    if (voices.length === 0) {
-      console.log('   -> no voices found. Try a different API key or add voices to your account.');
-      return;
-    }
-    voices.forEach((v, i) => {
-      const labelBits = [];
-      if (v.labels?.gender) labelBits.push(v.labels.gender);
-      if (v.labels?.accent) labelBits.push(v.labels.accent);
-      if (v.labels?.description) labelBits.push(v.labels.description);
-      console.log(`   ${i + 1}) ${v.name}  (${v.category}${labelBits.length ? ', ' + labelBits.join(', ') : ''})`);
-    });
-    const voicePick = await ask(rl, `Pick a voice (1-${voices.length})`, {
-      default: '1',
-    });
-    const vIdx = Math.max(1, Math.min(voices.length, parseInt(voicePick, 10) || 1)) - 1;
-    const voice = voices[vIdx];
-    console.log(`   -> picked: ${voice.name} (${voice.voice_id})`);
-
-    // Save config.
-    const cfg = {
-      name,
-      your_gender: yourGender,
-      helper_gender: helperGender,
-      sentence_length: length,
-      intro_index: introIndex,
-      voice_id: voice.voice_id,
-      voice_name: voice.name,
-      version: 1,
-      saved_at: new Date().toISOString(),
-    };
-    saveConfig(cfg);
-
-    // 8. Test alert
-    console.log('\n8) Playing test alert...');
-    try {
-      const result = await speak('Setup complete', { length: 'short' });
-      console.log(`   -> spoken: "${result.sentence}"`);
-      console.log(`   -> from desktop ${result.desktopIndex}`);
-    } catch (e) {
-      console.log('   -> test failed:', e.message);
-    }
-
-    console.log('\nSetup done. Try:  call-me-skill speak "render finished"\n');
-    console.log('Daemon + double-Ctrl jump: not in v0.1. See README "Roadmap".\n');
-  } finally {
-    rl.close();
+    const result = await speak('Setup complete', { length: 'short' });
+    console.log(`   -> spoken: "${result.sentence}"`);
+    console.log(`   -> from desktop ${result.desktopIndex}`);
+  } catch (e) {
+    console.log('   -> test failed:', e.message);
   }
+
+  console.log('\nSetup done. Try:  call-me-skill speak "render finished"\n');
+  console.log('Hotkey daemon (jump back to last call with one global keypress):');
+  console.log('  call-me-skill daemon start');
+  console.log('Then check the log to see which hotkey was registered:');
+  console.log('  type ~/.config/call-me-skill/daemon.log');
+  console.log('  (look for "hotkey registered: ..." - usually Win+Ctrl+J)\n');
 }

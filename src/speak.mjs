@@ -59,7 +59,7 @@ export async function speak(message, opts = {}) {
   const queue = [];
   if (!opts.noIntro && cfg.intro_index && cfg.intro_index !== 'none') {
     const introNum = String(cfg.intro_index).padStart(2, '0');
-    queue.push(join(INTROS_DIR, `intro-${introNum}.wav`));
+    queue.push(join(INTROS_DIR, `intro-${introNum}.mp3`));
   }
   queue.push(ttsPath);
 

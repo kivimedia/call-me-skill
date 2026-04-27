@@ -1,6 +1,7 @@
 // Cross-platform audio playback. Windows: PowerShell + System.Windows.Media.MediaPlayer.
-// Returns when playback finishes (sync wait). Best-effort - if PS errors, logs and returns.
-import { spawnSync } from 'node:child_process';
+// playSequence is sync (blocks). playAsync returns a handle you can cancel
+// for interactive auditioning.
+import { spawnSync, spawn } from 'node:child_process';
 
 /**
  * Play one or more audio files (MP3 or WAV) sequentially. Blocks until done.
@@ -40,4 +41,42 @@ foreach ($u in ${arr}) {
     ['-NoProfile', '-NonInteractive', '-Command', ps],
     { stdio: 'ignore', timeout: (max * paths.length + 5) * 1000 }
   );
+}
+
+/**
+ * Play a single audio file in the background. Returns a {cancel} handle so
+ * an interactive picker can stop playback when the user moves to the next
+ * item. Used by the wizard for intro + voice auditioning.
+ */
+export function playAsync(path, opts = {}) {
+  const max = Math.min(opts.maxSeconds ?? 8, 30);
+  const escaped = `'file:///${path.replace(/\\/g, '/').replace(/'/g, "''")}'`;
+  const ps = `
+$ErrorActionPreference = 'SilentlyContinue'
+Add-Type -AssemblyName presentationCore
+$p = New-Object System.Windows.Media.MediaPlayer
+$p.Open([uri]${escaped})
+$p.Volume = 1.0
+$p.Play()
+$waited = 0
+while ($true) {
+  Start-Sleep -Milliseconds 200
+  $waited += 200
+  $dur = $p.NaturalDuration
+  if ($dur.HasTimeSpan -and $p.Position -ge $dur.TimeSpan) { break }
+  if ($waited -ge ${max * 1000}) { break }
+}
+$p.Stop()
+$p.Close()
+`;
+  const child = spawn(
+    'powershell.exe',
+    ['-NoProfile', '-NonInteractive', '-Command', ps],
+    { stdio: 'ignore', windowsHide: true }
+  );
+  return {
+    cancel() {
+      try { child.kill(); } catch {}
+    },
+  };
 }

@@ -1,21 +1,23 @@
-// Background hotkey daemon. Two triggers:
-//   - Double-tap Ctrl (within 400ms): jump to last-call.json's desktop +
-//     foreground its window.
-//   - Win+Ctrl+1..9: jump to desktop N (built-in Win shortcut is broken on
-//     some machines; this is a reliable fallback).
+// Background hotkey daemon. Spawns hotkeys.ps1 (PowerShell using
+// RegisterHotKey via P/Invoke) and reacts to TRIGGER:<name> lines.
 //
-// Run via `call-me-skill daemon start` (spawned detached). PID + log are
-// written to ~/.config/call-me-skill/.
+// Hotkeys (registered by hotkeys.ps1):
+//   Win+Ctrl+0     -> jump to last call's desktop + window
+//   Win+Ctrl+1..9  -> jump to desktop N
 //
-// Detection is intentionally conservative: a Ctrl combo (Ctrl+C, Ctrl+V, etc.)
-// resets the double-tap state machine. Holding Ctrl for >250ms also resets.
+// Why PowerShell + RegisterHotKey instead of low-level keyboard hooks:
+// Windows Defender flags low-level hooks (e.g. node-global-key-listener's
+// WinKeyServer.exe) as keylogger malware and quarantines them. RegisterHotKey
+// is the official Windows API for this and never trips antivirus.
+import { spawn } from 'node:child_process';
 import { existsSync, readFileSync, appendFileSync } from 'node:fs';
-import { GlobalKeyboardListener } from 'node-global-key-listener';
+import { fileURLToPath } from 'node:url';
+import { join, dirname } from 'node:path';
 import { jumpToDesktop } from './desktop.mjs';
 import { LAST_CALL_FILE, DAEMON_LOG_FILE, ensureConfigDir } from './paths.mjs';
 
-const DOUBLE_TAP_WINDOW_MS = 400; // Time between the two CTRL DOWN events
-const TAP_HOLD_MAX_MS = 250;       // Max time CTRL is held during one tap
+const __dirname = dirname(fileURLToPath(import.meta.url));
+const PS_SCRIPT = join(__dirname, 'hotkeys.ps1');
 
 function log(...parts) {
   const line = `[${new Date().toISOString()}] ${parts.join(' ')}\n`;
@@ -33,109 +35,82 @@ function readLastCall() {
   }
 }
 
+function handleTrigger(name) {
+  if (name === 'last') {
+    const last = readLastCall();
+    if (!last) {
+      log('Win+Ctrl+0 pressed but no last-call.json - run `call-me-skill speak ...` first');
+      return;
+    }
+    log('Win+Ctrl+0 -> last call: desktop', last.desktop_index, 'hwnd', last.window_handle);
+    try {
+      const r = jumpToDesktop(last.desktop_index, last.window_handle || 0);
+      log('jump:', JSON.stringify(r));
+    } catch (e) {
+      log('jump failed:', e.message);
+    }
+    return;
+  }
+  const m = name.match(/^jump-(\d)$/);
+  if (m) {
+    const target = parseInt(m[1], 10);
+    log(`Win+Ctrl+${target} -> jumping`);
+    try {
+      const r = jumpToDesktop(target, 0);
+      log('jump:', JSON.stringify(r));
+    } catch (e) {
+      log('jump failed:', e.message);
+    }
+    return;
+  }
+  log('unknown trigger:', name);
+}
+
 export async function runDaemon() {
   ensureConfigDir();
   log('daemon starting, pid=' + process.pid);
 
-  const listener = new GlobalKeyboardListener();
+  const ps = spawn(
+    'powershell.exe',
+    ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', PS_SCRIPT],
+    { stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true }
+  );
 
-  // State for double-tap Ctrl.
-  let firstDownAt = 0;     // T1: first CTRL DOWN time
-  let firstUpAt = 0;       // T2: first CTRL UP time
-  let armed = false;       // True after a clean tap (DOWN -> UP within hold limit)
-
-  // State for Win+Ctrl+N.
-  let winHeld = false;
-  let ctrlHeld = false;
-
-  function resetDoubleTap(reason) {
-    if (firstDownAt || armed) log('double-tap reset:', reason);
-    firstDownAt = 0;
-    firstUpAt = 0;
-    armed = false;
-  }
-
-  await listener.addListener((e) => {
-    const name = e.name;
-    if (!name) return;
-
-    const isCtrl = name === 'LEFT CTRL' || name === 'RIGHT CTRL';
-    const isWin = name === 'LEFT META' || name === 'RIGHT META';
-
-    // Track modifier state for Win+Ctrl+N combo.
-    if (isWin) winHeld = e.state === 'DOWN';
-    if (isCtrl) ctrlHeld = e.state === 'DOWN';
-
-    // Win+Ctrl+1..9 -> jump to desktop N. Halt propagation so Windows
-    // doesn't also try to handle it (and confuse itself).
-    if (e.state === 'DOWN' && winHeld && ctrlHeld && /^[1-9]$/.test(name)) {
-      const target = parseInt(name, 10);
-      log(`Win+Ctrl+${target} -> jumping`);
-      try {
-        const r = jumpToDesktop(target, 0);
-        log('jump:', JSON.stringify(r));
-      } catch (err) {
-        log('jump failed:', err.message);
+  let stdoutBuf = '';
+  ps.stdout.on('data', (chunk) => {
+    stdoutBuf += chunk.toString();
+    let nl;
+    while ((nl = stdoutBuf.indexOf('\n')) !== -1) {
+      const line = stdoutBuf.slice(0, nl).trim();
+      stdoutBuf = stdoutBuf.slice(nl + 1);
+      if (line.startsWith('TRIGGER:')) handleTrigger(line.slice(8));
+      else if (line.startsWith('HOTKEY:')) {
+        log(`hotkey registered: ${line.slice(7)} = jump to last call`);
       }
-      // Reset double-tap state since this was a combo.
-      resetDoubleTap('win+ctrl+N consumed');
-      return true; // halt
+      else if (line) log('ps stdout:', line);
     }
-
-    // Double-Ctrl detection.
-    // Any non-Ctrl, non-Win key event resets the state machine - this
-    // prevents Ctrl+C, Ctrl+V, Ctrl+arrow from arming a double-tap.
-    if (!isCtrl && !isWin) {
-      if (e.state === 'DOWN') resetDoubleTap('non-modifier key down');
-      return false;
-    }
-
-    if (!isCtrl) return false; // pure Win key events: ignore
-
-    const now = Date.now();
-
-    if (e.state === 'DOWN') {
-      if (armed && now - firstDownAt <= DOUBLE_TAP_WINDOW_MS && now - firstUpAt > 0) {
-        // Second DOWN within the window -> trigger.
-        log('double-Ctrl detected, dt=' + (now - firstDownAt) + 'ms');
-        resetDoubleTap('triggered');
-        const last = readLastCall();
-        if (!last) {
-          log('no last-call.json - skipping jump');
-          return false;
-        }
-        log('jumping to desktop', last.desktop_index, 'hwnd', last.window_handle);
-        try {
-          const r = jumpToDesktop(last.desktop_index, last.window_handle || 0);
-          log('jump:', JSON.stringify(r));
-        } catch (err) {
-          log('jump failed:', err.message);
-        }
-        return false;
-      }
-      // First DOWN of a new (potential) double-tap.
-      firstDownAt = now;
-      firstUpAt = 0;
-      armed = false;
-    } else if (e.state === 'UP') {
-      if (firstDownAt && !armed) {
-        const heldFor = now - firstDownAt;
-        if (heldFor <= TAP_HOLD_MAX_MS) {
-          firstUpAt = now;
-          armed = true;
-        } else {
-          resetDoubleTap('held too long: ' + heldFor + 'ms');
-        }
-      }
-    }
-
-    return false;
+  });
+  ps.stderr.on('data', (chunk) => {
+    const s = chunk.toString().trim();
+    if (s) log('ps stderr:', s);
+  });
+  ps.on('exit', (code) => {
+    log('hotkeys.ps1 exited with code', code, '- daemon shutting down');
+    process.exit(code === 0 ? 0 : 1);
   });
 
-  log('daemon ready - listening for double-Ctrl and Win+Ctrl+1..9');
+  log('daemon ready - waiting for hotkeys.ps1 to register');
 
-  // Keep alive.
-  process.on('SIGTERM', () => { log('SIGTERM, exiting'); process.exit(0); });
-  process.on('SIGINT', () => { log('SIGINT, exiting'); process.exit(0); });
-  setInterval(() => {}, 1 << 30); // hold the event loop open
+  process.on('SIGTERM', () => {
+    log('SIGTERM, killing PowerShell child');
+    try { ps.stdin.end(); } catch {}
+    try { ps.kill(); } catch {}
+    process.exit(0);
+  });
+  process.on('SIGINT', () => {
+    log('SIGINT, killing PowerShell child');
+    try { ps.stdin.end(); } catch {}
+    try { ps.kill(); } catch {}
+    process.exit(0);
+  });
 }

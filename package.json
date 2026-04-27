@@ -1,7 +1,7 @@
 {
   "name": "@kivimedia/call-me-skill",
-  "version": "0.2.0",
-  "description": "Voice-alert skill for Claude Code: Claude calls your name when it needs your attention, with a Lyria intro chime and a desktop number cue.",
+  "version": "0.3.0",
+  "description": "Voice-alert skill for Claude Code: Claude calls your name when it needs your attention, with a short SFX chime and a desktop number cue.",
   "type": "module",
   "bin": {
     "call-me-skill": "./bin/call-me-skill"
@@ -27,7 +27,6 @@
     "voice",
     "tts",
     "elevenlabs",
-    "lyria",
     "windows",
     "virtual-desktops",
     "notifications"
@@ -43,8 +42,7 @@
   },
   "homepage": "https://github.com/kivimedia/call-me-skill#readme",
   "dependencies": {
-    "google-auth-library": "^9.14.1",
-    "node-global-key-listener": "^0.3.0"
+    "@inquirer/prompts": "^8.4.2"
   },
   "os": [
     "win32"

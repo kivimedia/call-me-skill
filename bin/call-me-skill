@@ -36,9 +36,10 @@ Speak options:
   --length short|medium|long           Override configured sentence length
   --no-intro                           Skip the intro music
 
-Daemon hotkeys (after 'daemon start'):
-  Double-tap Ctrl                      Jump to the desktop + window of the last call
-  Win+Ctrl+1..9                        Jump to desktop 1..9
+Daemon hotkey (after 'daemon start'):
+  Win+Ctrl+J  (or fallback)            Jump to desktop + window of the last call
+                                       (fallback list tried in order if J is taken;
+                                        check ~/.config/call-me-skill/daemon.log for which won)
 
 Config: ~/.config/call-me-skill/config.json
 Secrets: ~/.config/call-me-skill/.env
