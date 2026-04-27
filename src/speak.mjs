@@ -70,13 +70,15 @@ export async function speak(message, opts = {}) {
   const ttsPath = join(tmpdir(), `call-me-skill-${Date.now()}.mp3`);
   writeFileSync(ttsPath, ttsBytes);
 
-  // Build playback queue.
+  // Build playback queue. Cap the intro at 1200ms - ElevenLabs SFX often
+  // pads the clip with silence after the actual chime, which mci's
+  // `play wait` would otherwise sit through before starting TTS.
   const queue = [];
   if (!opts.noIntro && cfg.intro_index && cfg.intro_index !== 'none') {
     const introNum = String(cfg.intro_index).padStart(2, '0');
-    queue.push(join(INTROS_DIR, `intro-${introNum}.mp3`));
+    queue.push({ path: join(INTROS_DIR, `intro-${introNum}.mp3`), maxMs: 1200 });
   }
-  queue.push(ttsPath);
+  queue.push({ path: ttsPath });
 
   playSequence(queue);
 

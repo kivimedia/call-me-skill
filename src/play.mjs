@@ -1,23 +1,35 @@
 // Audio playback via Windows Multimedia (winmm.dll mciSendString).
+// Sync, no event handlers, native MP3/WAV support.
 //
-// Why not MediaPlayer (System.Windows.Media): events like MediaOpened need a
-// WPF Dispatcher / message pump, which PowerShell -Command scripts don't run.
-// Without it, NaturalDuration never populates and we end up sleeping the full
-// fallback per clip - causing seconds of dead air between intro and TTS.
-//
-// mciSendString with the `wait` flag is synchronous - returns only when
-// playback completes. No events, no polling, no guesswork. Native MP3
-// support since Windows XP via the `mpegvideo` device type.
+// Per-clip maxMs cap: ElevenLabs SFX often pads the trailing audio with
+// silence (a 2.0s file might have 0.7s of chime then 1.3s of silence).
+// Pass {path, maxMs: 1200} to cut the silence and start the next clip on
+// time. TTS clips don't have padding so leave maxMs unset.
 import { spawnSync, spawn } from 'node:child_process';
 
-function buildPlaybackPS(paths) {
-  // Build a PS script that opens, plays-with-wait, closes each file in turn.
-  // Aliases are cms0, cms1, cms2... so they don't collide with anything else.
-  const psPaths = paths.map((p) => p.replace(/\\/g, '\\\\').replace(/`/g, '``').replace(/"/g, '\\"'));
-  const lines = psPaths.map((p, i) => {
+function escapeForPS(s) {
+  return s.replace(/\\/g, '\\\\').replace(/`/g, '``').replace(/'/g, "''");
+}
+
+function normalizeQueue(items) {
+  return items.map((it) => (typeof it === 'string' ? { path: it } : it));
+}
+
+function buildPlaybackPS(items) {
+  const lines = items.map((it, i) => {
     const alias = `cms${i}`;
+    const psPath = escapeForPS(it.path);
+    if (it.maxMs && it.maxMs > 0) {
+      // Use 'play X to N': mpegvideo device uses ms by default.
+      return `
+$null = [W.MCI]::mciSendString('open "${psPath}" alias ${alias}', $null, 0, [IntPtr]::Zero)
+$null = [W.MCI]::mciSendString('set ${alias} time format milliseconds', $null, 0, [IntPtr]::Zero)
+$null = [W.MCI]::mciSendString('play ${alias} from 0 to ${Math.floor(it.maxMs)} wait', $null, 0, [IntPtr]::Zero)
+$null = [W.MCI]::mciSendString('close ${alias}', $null, 0, [IntPtr]::Zero)
+`;
+    }
     return `
-$null = [W.MCI]::mciSendString('open "${p}" alias ${alias}', $null, 0, [IntPtr]::Zero)
+$null = [W.MCI]::mciSendString('open "${psPath}" alias ${alias}', $null, 0, [IntPtr]::Zero)
 $null = [W.MCI]::mciSendString('play ${alias} wait', $null, 0, [IntPtr]::Zero)
 $null = [W.MCI]::mciSendString('close ${alias}', $null, 0, [IntPtr]::Zero)
 `;
@@ -30,35 +42,32 @@ ${lines}
 }
 
 /**
- * Play one or more audio files (MP3 or WAV) sequentially. Blocks until done.
+ * Play queued items sequentially. Blocks until done.
  *
- * @param {string[]} paths - Absolute file paths
+ * @param {Array<string | {path: string, maxMs?: number}>} items - File paths
+ *   or {path, maxMs} objects. maxMs caps playback for silence-padded clips.
  * @param {object} [opts]
- * @param {number} [opts.maxSecondsTotal=60] - Hard timeout for the whole queue
- *   in case a file is corrupt and mci hangs.
+ * @param {number} [opts.maxSecondsTotal=60] - Hard timeout for the queue.
  */
-export function playSequence(paths, opts = {}) {
-  if (!paths || paths.length === 0) return;
+export function playSequence(items, opts = {}) {
+  if (!items || items.length === 0) return;
   const max = Math.min(opts.maxSecondsTotal ?? 60, 120);
   spawnSync(
     'powershell.exe',
-    ['-NoProfile', '-NonInteractive', '-Command', buildPlaybackPS(paths)],
+    ['-NoProfile', '-NonInteractive', '-Command', buildPlaybackPS(normalizeQueue(items))],
     { stdio: 'ignore', timeout: max * 1000 }
   );
 }
 
 /**
- * Play a single audio file in the background. Returns a {cancel} handle so
- * an interactive picker can stop playback when the user moves to the next
- * item. Used by the wizard for intro + voice auditioning.
+ * Play a single audio file in the background. Returns a {cancel} handle.
+ * Used by the wizard for intro + voice auditioning.
  */
 export function playAsync(path) {
   const child = spawn(
     'powershell.exe',
-    ['-NoProfile', '-NonInteractive', '-Command', buildPlaybackPS([path])],
+    ['-NoProfile', '-NonInteractive', '-Command', buildPlaybackPS([{ path }])],
     { stdio: 'ignore', windowsHide: true }
   );
-  return {
-    cancel() { try { child.kill(); } catch {} },
-  };
+  return { cancel() { try { child.kill(); } catch {} } };
 }
