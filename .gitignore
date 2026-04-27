@@ -1,0 +1,46 @@
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+build/
+
+# Native build artifacts (the .exe is committed; intermediate build files are not)
+native/bin/
+native/obj/
+native/*.pdb
+*.user
+
+# Per-user config + secrets (defensive - these live in ~/.config not the repo)
+.env
+.env.*
+!.env.example
+*.secret.json
+*-secret.json
+*service-account*.json
+*credentials*.json
+config.json
+voice-mode.flag
+last-call.json
+
+# Vercel pulls
+.env.lyria-pull
+.env.local
+
+# OS noise
+.DS_Store
+Thumbs.db
+
+# Editor
+.vscode/
+.idea/
+*.swp
+*.tmp
+
+# Logs
+*.log
+npm-debug.log*
+
+# Test artifacts
+coverage/
+.nyc_output/

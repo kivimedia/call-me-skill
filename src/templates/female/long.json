@@ -1,0 +1,7 @@
+[
+  "{name}, {address}, this is your assistant calling from desktop {desktop}, just letting you know: {message}.",
+  "Hi {name}, {address}, dropping by from desktop {desktop} to tell you: {message}. Whenever you have a second.",
+  "{name}, {address}, just chiming in from desktop {desktop} - {message}. No rush, but worth a look.",
+  "Hey {name}, calling from desktop {desktop} with an update for you, {address}: {message}.",
+  "{name}, {address}, heads-up from desktop {desktop}: {message}. Catch you when you're free."
+]

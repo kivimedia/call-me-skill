@@ -1,0 +1,7 @@
+[
+  "{name}, {address}, calling from desktop {desktop}, {message}.",
+  "{name}, pinging from desktop {desktop}: {message}.",
+  "Hey {name}, {address}, chiming in from desktop {desktop}, {message}.",
+  "{name}, this is desktop {desktop} speaking, {message}.",
+  "{name}, {address}, quick one from desktop {desktop}: {message}."
+]

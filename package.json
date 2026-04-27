@@ -1,0 +1,51 @@
+{
+  "name": "@kivimedia/call-me-skill",
+  "version": "0.1.0",
+  "description": "Voice-alert skill for Claude Code: Claude calls your name when it needs your attention, with a Lyria intro chime and a desktop number cue.",
+  "type": "module",
+  "bin": {
+    "call-me-skill": "./bin/call-me-skill"
+  },
+  "files": [
+    "bin",
+    "src",
+    "assets/intros",
+    "SKILL.md",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "test": "echo 'no automated tests yet' && exit 0",
+    "gen-intros": "node scripts/generate-intros.mjs"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "keywords": [
+    "claude-code",
+    "skill",
+    "voice",
+    "tts",
+    "elevenlabs",
+    "lyria",
+    "windows",
+    "virtual-desktops",
+    "notifications"
+  ],
+  "author": "Kivi Media",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/kivimedia/call-me-skill.git"
+  },
+  "bugs": {
+    "url": "https://github.com/kivimedia/call-me-skill/issues"
+  },
+  "homepage": "https://github.com/kivimedia/call-me-skill#readme",
+  "dependencies": {
+    "google-auth-library": "^9.14.1"
+  },
+  "os": [
+    "win32"
+  ]
+}

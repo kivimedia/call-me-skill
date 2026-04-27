@@ -1,0 +1,7 @@
+[
+  "{name}, desktop {desktop}: {message}.",
+  "Desktop {desktop}, {name}: {message}.",
+  "{name} from desktop {desktop}: {message}.",
+  "{message}, {name}. Desktop {desktop}.",
+  "{name}, {message}. From desktop {desktop}."
+]

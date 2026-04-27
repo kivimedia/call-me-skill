@@ -1,0 +1,96 @@
+#!/usr/bin/env node
+// CLI entry point. Subcommands: setup, speak, mode (TODO v0.2), jump (TODO v0.2),
+// daemon (TODO v0.2), --version.
+import { argv, exit } from 'node:process';
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
+import { join, dirname } from 'node:path';
+
+const __dirname = dirname(fileURLToPath(import.meta.url));
+const PKG_PATH = join(__dirname, '..', 'package.json');
+
+function getVersion() {
+  try {
+    return JSON.parse(readFileSync(PKG_PATH, 'utf8')).version;
+  } catch {
+    return 'unknown';
+  }
+}
+
+function help() {
+  console.log(`call-me-skill v${getVersion()}
+
+Usage:
+  call-me-skill setup                  Run the first-run wizard
+  call-me-skill speak "<message>"      Speak a message through your speakers
+                                       (composes "{name}, calling from desktop {N}, {message}")
+  call-me-skill mode on | off          v0.2 - voice mode (Stop hook)
+  call-me-skill jump <N>               v0.2 - jump to desktop N
+  call-me-skill daemon start | stop    v0.2 - hotkey daemon (double-Ctrl, Win+Ctrl+1..9)
+  call-me-skill --version              Print version
+  call-me-skill --help                 This message
+
+Speak options:
+  --length short|medium|long           Override configured sentence length
+  --no-intro                           Skip the intro music
+
+Config: ~/.config/call-me-skill/config.json
+Secrets: ~/.config/call-me-skill/.env
+`);
+}
+
+async function main() {
+  const args = argv.slice(2);
+  if (args.length === 0 || args[0] === '--help' || args[0] === '-h') {
+    help();
+    return;
+  }
+  if (args[0] === '--version' || args[0] === '-v') {
+    console.log(getVersion());
+    return;
+  }
+
+  const cmd = args[0];
+  const rest = args.slice(1);
+
+  switch (cmd) {
+    case 'setup': {
+      const { runSetup } = await import('../src/setup.mjs');
+      await runSetup();
+      return;
+    }
+    case 'speak': {
+      const { speak } = await import('../src/speak.mjs');
+      const opts = {};
+      const positional = [];
+      for (let i = 0; i < rest.length; i++) {
+        const a = rest[i];
+        if (a === '--length') opts.length = rest[++i];
+        else if (a === '--no-intro') opts.noIntro = true;
+        else positional.push(a);
+      }
+      const message = positional.join(' ').trim();
+      if (!message) {
+        console.error('Usage: call-me-skill speak "<message>"');
+        exit(2);
+      }
+      const result = await speak(message, opts);
+      console.log(`spoken: ${result.sentence}`);
+      return;
+    }
+    case 'mode':
+    case 'jump':
+    case 'daemon':
+      console.error(`"${cmd}" not implemented in v0.1. See README Roadmap.`);
+      exit(2);
+    default:
+      console.error(`Unknown command: ${cmd}`);
+      help();
+      exit(2);
+  }
+}
+
+main().catch((err) => {
+  console.error('Error:', err.message || err);
+  exit(1);
+});
