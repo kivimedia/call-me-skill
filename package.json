@@ -1,6 +1,6 @@
 {
   "name": "@kivimedia/call-me-skill",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Voice-alert skill for Claude Code: Claude calls your name when it needs your attention, with a Lyria intro chime and a desktop number cue.",
   "type": "module",
   "bin": {
@@ -43,7 +43,8 @@
   },
   "homepage": "https://github.com/kivimedia/call-me-skill#readme",
   "dependencies": {
-    "google-auth-library": "^9.14.1"
+    "google-auth-library": "^9.14.1",
+    "node-global-key-listener": "^0.3.0"
   },
   "os": [
     "win32"

@@ -10,6 +10,8 @@ export const CONFIG_FILE = join(CONFIG_DIR, 'config.json');
 export const ENV_FILE = join(CONFIG_DIR, '.env');
 export const VOICE_MODE_FLAG = join(CONFIG_DIR, 'voice-mode.flag');
 export const LAST_CALL_FILE = join(CONFIG_DIR, 'last-call.json');
+export const DAEMON_PID_FILE = join(CONFIG_DIR, 'daemon.pid');
+export const DAEMON_LOG_FILE = join(CONFIG_DIR, 'daemon.log');
 
 // Ship-with-package paths.
 const __dirname = fileURLToPath(new URL('.', import.meta.url));

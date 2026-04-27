@@ -11,14 +11,16 @@ a short musical sting and says:
 Built for Windows. Uses your existing ElevenLabs voice for TTS and ships with
 10 pre-bundled Lyria 2 intro chimes you audition during setup.
 
+**v0.2 (new):** background hotkey daemon. Double-tap Ctrl to jump straight to
+the desktop + window that called you. Win+Ctrl+1..9 to jump to any desktop
+(works around the broken built-in shortcut).
+
 ## Why
 
 Beeps blend in. A short chime + a real voice saying your name + which desktop
 the calling window is on cuts through everything else you're doing. The
-desktop number tells you exactly where to look (Win+Tab, click that desktop).
-
-A planned v0.2 adds a hotkey daemon: double-tap Ctrl to jump straight to the
-window that called you, even across virtual desktops.
+desktop number tells you exactly where to look. With the v0.2 daemon running,
+you don't even need to look - just double-tap Ctrl and you're there.
 
 ## Install
 
@@ -58,6 +60,31 @@ Options:
 --no-intro                   Skip the intro chime
 ```
 
+### Hotkey daemon (v0.2)
+
+```bash
+call-me-skill daemon start    # background process, survives terminal close
+call-me-skill daemon status
+call-me-skill daemon stop
+```
+
+Once running, two hotkeys work globally:
+
+- **Double-tap Ctrl** within 400ms -> jumps to the desktop + window of the
+  *last* `speak` call. The double-tap state machine resets on any other key
+  press, so Ctrl+C / Ctrl+V / Ctrl+T won't trigger it accidentally.
+- **Win+Ctrl+1..9** -> jumps to desktop 1..9. (The built-in Windows shortcut
+  for this is unreliable on some machines.)
+
+Manual jump (no hotkey):
+
+```bash
+call-me-skill jump 5    # jump to desktop 5
+```
+
+The daemon writes a log to `~/.config/call-me-skill/daemon.log` so you can
+see what it's doing. PID lives at `~/.config/call-me-skill/daemon.pid`.
+
 ### From a Claude Code skill
 
 Add it to any Claude Code project as a skill:
@@ -95,24 +122,28 @@ Then in any conversation: `/call-me` and the model will use it.
 
 ## Roadmap
 
-v0.1 (this release):
+v0.1 (shipped):
 - [x] CLI: `setup`, `speak`
 - [x] 10 bundled Lyria intro chimes
 - [x] ElevenLabs voice picker (excludes default Adam)
 - [x] Gender-aware phrasing templates (3 helpers x 3 lengths)
 - [x] Windows desktop number detection
 
-v0.2 (next):
-- [ ] **Hotkey daemon** - background process that listens for:
-  - Double-tap Ctrl: jump to the desktop + window of the last call
-  - Win+Ctrl+1..9: jump to desktop N (works around the broken built-in shortcut)
+v0.2 (this release):
+- [x] **Hotkey daemon** - background process that listens for:
+  - [x] Double-tap Ctrl: jump to the desktop + window of the last call
+  - [x] Win+Ctrl+1..9: jump to desktop N (works around the broken built-in shortcut)
+- [x] **`jump <N>`** subcommand for manual desktop switching
+- [x] No native binary needed - desktop switching uses synthetic Win+Ctrl+Arrow
+  keypresses via `SendInput`, so we ship pure Node + PowerShell
+
+v0.3 (next):
 - [ ] **Voice mode toggle** - `call-me-skill mode on|off`. When on, Claude
   Code's Stop hook auto-fires `speak` with a short summary every time the
   agent stops.
 - [ ] **macOS / Linux** support (Mission Control / GNOME Activities)
-- [ ] **JumpToDesktop.exe** - tiny C# helper that calls
-  `IVirtualDesktopManagerInternal::SwitchDesktop` directly
 - [ ] **npm publish** to `@kivimedia/call-me-skill`
+- [ ] **Configurable hotkeys** - let users rebind double-Ctrl to triple-Alt etc.
 
 ## Maintainer notes
 

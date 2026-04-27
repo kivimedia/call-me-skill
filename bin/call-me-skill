@@ -1,6 +1,6 @@
 #!/usr/bin/env node
-// CLI entry point. Subcommands: setup, speak, mode (TODO v0.2), jump (TODO v0.2),
-// daemon (TODO v0.2), --version.
+// CLI entry point. Subcommands: setup, speak, jump, daemon (start|stop|status),
+// mode (TODO v0.3 - Stop hook voice mode), --version.
 import { argv, exit } from 'node:process';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
@@ -24,9 +24,11 @@ Usage:
   call-me-skill setup                  Run the first-run wizard
   call-me-skill speak "<message>"      Speak a message through your speakers
                                        (composes "{name}, calling from desktop {N}, {message}")
-  call-me-skill mode on | off          v0.2 - voice mode (Stop hook)
-  call-me-skill jump <N>               v0.2 - jump to desktop N
-  call-me-skill daemon start | stop    v0.2 - hotkey daemon (double-Ctrl, Win+Ctrl+1..9)
+  call-me-skill jump <N>               Jump to desktop N (1-based)
+  call-me-skill daemon start           Start the background hotkey daemon
+  call-me-skill daemon stop            Stop the daemon
+  call-me-skill daemon status          Show daemon status
+  call-me-skill mode on | off          v0.3 - voice mode (Stop hook)
   call-me-skill --version              Print version
   call-me-skill --help                 This message
 
@@ -34,8 +36,13 @@ Speak options:
   --length short|medium|long           Override configured sentence length
   --no-intro                           Skip the intro music
 
+Daemon hotkeys (after 'daemon start'):
+  Double-tap Ctrl                      Jump to the desktop + window of the last call
+  Win+Ctrl+1..9                        Jump to desktop 1..9
+
 Config: ~/.config/call-me-skill/config.json
 Secrets: ~/.config/call-me-skill/.env
+Daemon log: ~/.config/call-me-skill/daemon.log
 `);
 }
 
@@ -78,10 +85,31 @@ async function main() {
       console.log(`spoken: ${result.sentence}`);
       return;
     }
+    case 'jump': {
+      const { jumpToDesktop } = await import('../src/desktop.mjs');
+      const target = parseInt(rest[0], 10);
+      if (!Number.isFinite(target) || target < 1) {
+        console.error('Usage: call-me-skill jump <N>  (N is a 1-based desktop index)');
+        exit(2);
+      }
+      const r = jumpToDesktop(target, 0);
+      console.log(`jump: desktop ${r.fromIndex} -> ${r.toIndex} (${r.steps} ${r.direction})`);
+      return;
+    }
+    case 'daemon': {
+      const sub = rest[0];
+      const { daemonStart, daemonStop, daemonStatusCmd } = await import('../src/daemon-cli.mjs');
+      if (sub === 'start') daemonStart();
+      else if (sub === 'stop') daemonStop();
+      else if (sub === 'status') daemonStatusCmd();
+      else {
+        console.error('Usage: call-me-skill daemon start | stop | status');
+        exit(2);
+      }
+      return;
+    }
     case 'mode':
-    case 'jump':
-    case 'daemon':
-      console.error(`"${cmd}" not implemented in v0.1. See README Roadmap.`);
+      console.error(`"${cmd}" not implemented in v0.2. Planned for v0.3.`);
       exit(2);
     default:
       console.error(`Unknown command: ${cmd}`);
