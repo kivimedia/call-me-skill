@@ -1,6 +1,6 @@
 {
   "name": "@kivimedia/call-me-skill",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "description": "Voice-alert skill for Claude Code: Claude calls your name when it needs your attention, with a short SFX chime and a desktop number cue.",
   "type": "module",
   "bin": {
@@ -9,6 +9,8 @@
   "files": [
     "bin",
     "src",
+    "native/CallMeSkillDaemon.exe",
+    "native/CallMeSkillDaemon.cs",
     "assets/intros",
     "SKILL.md",
     "README.md",
@@ -16,7 +18,8 @@
   ],
   "scripts": {
     "test": "echo 'no automated tests yet' && exit 0",
-    "gen-intros": "node scripts/generate-intros.mjs"
+    "gen-intros": "node scripts/generate-intros.mjs",
+    "build-native": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/build-native.ps1"
   },
   "engines": {
     "node": ">=20"

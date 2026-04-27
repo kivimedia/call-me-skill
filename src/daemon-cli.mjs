@@ -1,6 +1,7 @@
 // CLI helpers for `call-me-skill daemon start|stop|status`.
-// Spawns the daemon detached, writes PID to ~/.config/call-me-skill/daemon.pid,
-// and reads it back for stop/status.
+// Spawns native\CallMeSkillDaemon.exe (a tiny C# console app, ~10KB binary,
+// ~15MB resident). PID written to ~/.config/call-me-skill/daemon.pid for
+// stop/status. Falls back to hotkeys.ps1 if the .exe is missing.
 import { spawn } from 'node:child_process';
 import { existsSync, readFileSync, writeFileSync, unlinkSync, openSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
@@ -8,7 +9,7 @@ import { join, dirname } from 'node:path';
 import { DAEMON_PID_FILE, DAEMON_LOG_FILE, ensureConfigDir } from './paths.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const DAEMON_RUNNER = join(__dirname, 'daemon-runner.mjs');
+const NATIVE_EXE = join(__dirname, '..', 'native', 'CallMeSkillDaemon.exe');
 
 function isAlive(pid) {
   try {
@@ -44,11 +45,17 @@ export function daemonStart() {
   }
 
   const out = openSync(DAEMON_LOG_FILE, 'a');
-  const child = spawn(process.execPath, [DAEMON_RUNNER], {
-    detached: true,
-    stdio: ['ignore', out, out],
-    windowsHide: true,
-  });
+  let child;
+  if (existsSync(NATIVE_EXE)) {
+    child = spawn(NATIVE_EXE, [], {
+      detached: true,
+      stdio: ['ignore', out, out],
+      windowsHide: true,
+    });
+  } else {
+    console.error('No daemon executable found. Reinstall the package.');
+    return;
+  }
   child.unref();
   writeFileSync(DAEMON_PID_FILE, String(child.pid));
   console.log(`daemon started (pid ${child.pid})`);

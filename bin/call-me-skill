@@ -25,9 +25,11 @@ Usage:
   call-me-skill speak "<message>"      Speak a message through your speakers
                                        (composes "{name}, calling from desktop {N}, {message}")
   call-me-skill jump <N>               Jump to desktop N (1-based)
-  call-me-skill daemon start           Start the background hotkey daemon
+  call-me-skill daemon start           Start the background hotkey daemon (one shot)
   call-me-skill daemon stop            Stop the daemon
-  call-me-skill daemon status          Show daemon status
+  call-me-skill daemon status          Show daemon + autostart status
+  call-me-skill daemon install         Install daemon as login autostart + start now
+  call-me-skill daemon uninstall       Remove the login autostart entry
   call-me-skill mode on | off          v0.3 - voice mode (Stop hook)
   call-me-skill --version              Print version
   call-me-skill --help                 This message
@@ -100,11 +102,26 @@ async function main() {
     case 'daemon': {
       const sub = rest[0];
       const { daemonStart, daemonStop, daemonStatusCmd } = await import('../src/daemon-cli.mjs');
+      const { installAutostart, uninstallAutostart, isAutostartInstalled, autostartPath } =
+        await import('../src/autostart.mjs');
       if (sub === 'start') daemonStart();
       else if (sub === 'stop') daemonStop();
-      else if (sub === 'status') daemonStatusCmd();
+      else if (sub === 'status') {
+        daemonStatusCmd();
+        console.log(`autostart: ${isAutostartInstalled() ? 'installed at ' + autostartPath() : 'NOT installed'}`);
+      }
+      else if (sub === 'install') {
+        const path = installAutostart();
+        console.log(`autostart installed at ${path}`);
+        console.log('daemon will start on every login.');
+        daemonStart();
+      }
+      else if (sub === 'uninstall') {
+        const removed = uninstallAutostart();
+        console.log(removed ? 'autostart removed.' : 'autostart was not installed.');
+      }
       else {
-        console.error('Usage: call-me-skill daemon start | stop | status');
+        console.error('Usage: call-me-skill daemon start | stop | status | install | uninstall');
         exit(2);
       }
       return;

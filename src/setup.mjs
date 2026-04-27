@@ -196,10 +196,21 @@ export async function runSetup() {
     console.log('   -> test failed:', e.message);
   }
 
-  console.log('\nSetup done. Try:  call-me-skill speak "render finished"\n');
-  console.log('Hotkey daemon (jump back to last call with one global keypress):');
-  console.log('  call-me-skill daemon start');
-  console.log('Then check the log to see which hotkey was registered:');
-  console.log('  type ~/.config/call-me-skill/daemon.log');
-  console.log('  (look for "hotkey registered: ..." - usually Win+Ctrl+J)\n');
+  // 9. Auto-install + start the hotkey daemon. No prompt - it's ~40MB resident,
+  // listens for one global hotkey to jump you back to the calling window. The
+  // user can disable later with `call-me-skill daemon uninstall`.
+  console.log('\n9) Installing hotkey daemon (autostart on login + starting now)...');
+  try {
+    const { installAutostart, autostartPath } = await import('./autostart.mjs');
+    const { daemonStart } = await import('./daemon-cli.mjs');
+    const path = installAutostart();
+    console.log(`   -> autostart: ${path}`);
+    daemonStart();
+    console.log('   -> press the hotkey shown in daemon.log to jump back to a calling window.');
+  } catch (e) {
+    console.log('   -> autostart install failed:', e.message);
+  }
+
+  console.log('\nSetup done. Try:  call-me-skill speak "render finished"');
+  console.log('Disable autostart anytime with:  call-me-skill daemon uninstall\n');
 }
