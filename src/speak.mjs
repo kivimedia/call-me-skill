@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import { loadConfig, loadEnv } from './config.mjs';
 import { compose } from './compose.mjs';
 import { tts } from './voice.mjs';
-import { getCurrentDesktop, getForegroundWindowHandle, findWindowHandle } from './desktop.mjs';
+import { getCallerDesktop, getForegroundWindowHandle, findWindowHandle } from './desktop.mjs';
 import { playSequence } from './play.mjs';
 import { INTROS_DIR, LAST_CALL_FILE, ensureConfigDir } from './paths.mjs';
 
@@ -34,7 +34,11 @@ export async function speak(message, opts = {}) {
     throw new Error('No voice_id in config. Run: call-me-skill setup');
   }
 
-  const desktop = getCurrentDesktop();
+  // Use the CALLER's desktop (where the process invoking speak actually lives),
+  // not the foreground desktop. Critical for automated callers like Claude Code
+  // that run on a different virtual desktop from whatever the human is looking at.
+  // Falls back to getCurrentDesktop() if no PID env var is set (interactive CLI use).
+  const desktop = getCallerDesktop();
   const sentence = compose(cfg, message, desktop.index, { lengthOverride: opts.length });
 
   // Save last-call state for the daemon hotkey.
@@ -55,6 +59,7 @@ export async function speak(message, opts = {}) {
     JSON.stringify(
       {
         desktop_index: desktop.index,
+        desktop_source: desktop.source,
         window_handle: hwnd,
         focus_used: focusUsed,
         sentence,

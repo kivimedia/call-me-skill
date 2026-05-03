@@ -38,6 +38,102 @@ export function getCurrentDesktop() {
   }
 }
 
+// Detect the desktop where the CALLING process actually lives. Uses
+// IVirtualDesktopManager::GetWindowDesktopId on the caller's main window,
+// not the foreground-desktop registry value (which tracks whichever desktop
+// the human is currently looking at - wrong answer when an automated agent
+// like Claude Code calls speak() from a window on a DIFFERENT desktop).
+//
+// Resolution order:
+//   1. CALL_ME_PID env var (explicit override, any callable process)
+//   2. VSCODE_PID    (set in every VS Code integrated terminal)
+//   3. CURSOR_PID    (Cursor's equivalent)
+//   4. ANTIGRAVITY_PID  (Antigravity's equivalent, if set)
+//   5. fallback to getCurrentDesktop() (foreground = old behavior)
+//
+// On any failure (PID has no MainWindowHandle, COM call throws, etc.) we
+// transparently fall back to getCurrentDesktop() so callers never break.
+const PS_CALLER = (pid) => `
+$ErrorActionPreference = 'Stop'
+$proc = Get-Process -Id ${pid} -ErrorAction SilentlyContinue
+if (-not $proc -or $proc.MainWindowHandle -eq 0) {
+  Write-Output '{"ok":false,"reason":"no-mainwindow"}'
+  exit 0
+}
+$hwnd = $proc.MainWindowHandle
+Add-Type -TypeDefinition @"
+using System;
+using System.Runtime.InteropServices;
+[ComImport, Guid("a5cd92ff-29be-454c-8d04-d82879fb3f1b"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+public interface IVDM {
+  [PreserveSig] int IsWindowOnCurrentVirtualDesktop(IntPtr h, out bool b);
+  [PreserveSig] int GetWindowDesktopId(IntPtr h, out Guid g);
+}
+public static class VDM {
+  static readonly Guid CLSID = new Guid("aa509086-5ca9-4c25-8f95-589d3c07b48a");
+  public static Guid GetDesktop(IntPtr h) {
+    var t = Type.GetTypeFromCLSID(CLSID);
+    var o = (IVDM)Activator.CreateInstance(t);
+    Guid g;
+    int hr = o.GetWindowDesktopId(h, out g);
+    if (hr != 0) throw new System.ComponentModel.Win32Exception(hr);
+    return g;
+  }
+}
+"@
+$g = ([VDM]::GetDesktop([IntPtr]$hwnd)).Guid.ToLower()
+$base = 'HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\VirtualDesktops'
+$all = (Get-ItemProperty $base).VirtualDesktopIDs
+$count = $all.Length / 16
+$idx = 0
+for ($i = 0; $i -lt $count; $i++) {
+  $guid = [Guid]::new([byte[]] $all[($i*16)..($i*16+15)]).Guid.ToLower()
+  if ($guid -eq $g) { $idx = $i + 1; break }
+}
+Write-Output ('{"ok":true,"index":' + $idx + ',"count":' + $count + ',"hwnd":' + $hwnd + ',"guid":"' + $g + '"}')
+`;
+
+const CALLER_PID_VARS = ['CALL_ME_PID', 'VSCODE_PID', 'CURSOR_PID', 'ANTIGRAVITY_PID'];
+
+export function getCallerDesktop() {
+  let pid = null;
+  let envSource = null;
+  for (const k of CALLER_PID_VARS) {
+    const v = process.env[k];
+    if (!v) continue;
+    const n = parseInt(v, 10);
+    if (Number.isFinite(n) && n > 0) {
+      pid = n;
+      envSource = k;
+      break;
+    }
+  }
+  if (!pid) {
+    return { ...getCurrentDesktop(), source: 'foreground-no-pid' };
+  }
+  try {
+    const out = execFileSync(
+      'powershell.exe',
+      ['-NoProfile', '-NonInteractive', '-Command', PS_CALLER(pid)],
+      { encoding: 'utf8', timeout: 10000 }
+    );
+    const result = JSON.parse(out.trim());
+    if (result.ok && result.index > 0) {
+      return {
+        index: result.index,
+        count: result.count,
+        guid: result.guid,
+        source: `caller-pid:${envSource}`,
+        pid,
+        hwnd: result.hwnd,
+      };
+    }
+    return { ...getCurrentDesktop(), source: `foreground-fallback:${envSource}:${result.reason || 'unknown'}` };
+  } catch (err) {
+    return { ...getCurrentDesktop(), source: `foreground-fallback:${envSource}:exception`, error: err.message };
+  }
+}
+
 /**
  * Find the HWND of a window whose title contains `pattern` (case-insensitive
  * substring match). Returns the most-recently-active match, or 0 if none.

@@ -1,6 +1,6 @@
 {
   "name": "@kivimedia/call-me-skill",
-  "version": "0.3.2",
+  "version": "0.4.0",
   "description": "Voice-alert skill for Claude Code: Claude calls your name when it needs your attention, with a short SFX chime and a desktop number cue.",
   "type": "module",
   "bin": {

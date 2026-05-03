@@ -111,10 +111,19 @@ Then in any conversation: `/call-me` and the model will use it.
 1. **Compose** - reads your config, picks a random phrasing template for your
    helper gender + chosen length, substitutes `{name}`, `{address}`,
    `{desktop}`, `{message}`.
-2. **Detect desktop** - reads
-   `HKCU\Software\Microsoft\Windows\CurrentVersion\Explorer\VirtualDesktops`
-   to find the current desktop's index out of N. Also captures the foreground
-   window handle (used by the planned daemon to jump back).
+2. **Detect desktop** - finds which desktop the **calling process** lives on.
+   When invoked from a VS Code / Cursor / Antigravity terminal (which sets
+   `VSCODE_PID` / `CURSOR_PID` / `ANTIGRAVITY_PID` automatically), the CLI
+   resolves that PID's main-window HWND and asks
+   `IVirtualDesktopManager::GetWindowDesktopId(hwnd)` for its desktop GUID,
+   then matches against
+   `HKCU\Software\Microsoft\Windows\CurrentVersion\Explorer\VirtualDesktops`.
+   This is the *correct* answer when an automated agent like Claude Code
+   calls `speak` from a different desktop than the one the human is currently
+   looking at. To force a specific PID, set `CALL_ME_PID=<pid>` in env. When
+   no PID env var is set (interactive shell, manual CLI use), falls back to
+   the foreground-desktop registry lookup. Also captures the foreground
+   window handle (used by the daemon to jump back).
 3. **TTS** - sends the sentence to ElevenLabs with your chosen voice.
 4. **Play** - PowerShell `System.Windows.Media.MediaPlayer` plays the intro
    chime then the speech, back to back. End users only hear the first ~2-3s

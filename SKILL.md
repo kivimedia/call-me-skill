@@ -19,6 +19,14 @@ When the user types `/call-me` with no args:
 - Ping with a short generic line based on session state. Examples: "your turn", "ready when you are", "blocked, need you". 5-8 words max.
 - Run: `call-me-skill speak "<your generic line>"`.
 
+### Desktop-number accuracy (v0.4.0+)
+
+As of v0.4.0 the CLI auto-detects the **caller's** desktop, not the foreground desktop. When invoked from a VS Code / Cursor / Antigravity integrated terminal, it reads `VSCODE_PID` / `CURSOR_PID` / `ANTIGRAVITY_PID` from env, finds that process's main-window HWND, and reports the desktop where THAT window actually lives. So if you (the agent) live on desktop 2 and the human is currently looking at desktop 5, the message correctly says "calling from desktop 2" - the human's eyes can find you.
+
+You don't need to do anything to enable this - it just works when the env var is set (which is always, when invoked from Claude Code's Bash tool). To force a specific PID, set `CALL_ME_PID=<pid>` in the env before calling.
+
+If no PID env var is set (rare - interactive shell outside an IDE terminal), the CLI falls back to the legacy foreground-desktop lookup.
+
 ## How to invoke (programmatic / proactive)
 
 Run via shell:
