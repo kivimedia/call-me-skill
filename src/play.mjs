@@ -1,5 +1,17 @@
-// Audio playback via Windows Multimedia (winmm.dll mciSendString).
-// Sync, no event handlers, native MP3/WAV support.
+// Audio playback via WPF MediaPlayer (System.Windows.Media.MediaPlayer).
+// Routes through Windows Media Foundation -> WASAPI = the SAME audio path
+// modern apps (YouTube, browsers, Spotify) use. Honors the modern WASAPI
+// default playback device set in Settings > System > Sound.
+//
+// Why not MCI (winmm.dll mciSendString)?
+//   MCI is a 1991 Windows API that uses the legacy "Wave Mapper" device
+//   routing, which is independent of the modern WASAPI default device.
+//   On machines with virtual audio cables (Voice.ai, NVIDIA Broadcast,
+//   VB-Audio CABLE, OBS, Discord, etc.) MCI often routes to a dead
+//   virtual sink while WASAPI plays to real speakers. Result: chime +
+//   TTS go into the void, user hears nothing, system reports success.
+//   Documented case: Ziv's machine, 2026-05-26 - YouTube + kmboards
+//   audio worked while call-me-skill MCI playback was silent.
 //
 // Per-clip maxMs cap: ElevenLabs SFX often pads the trailing audio with
 // silence (a 2.0s file might have 0.7s of chime then 1.3s of silence).
@@ -16,29 +28,39 @@ function normalizeQueue(items) {
 }
 
 function buildPlaybackPS(items) {
-  const lines = items.map((it, i) => {
-    const alias = `cms${i}`;
+  const lines = items.map((it) => {
     const psPath = escapeForPS(it.path);
     if (it.maxMs && it.maxMs > 0) {
-      // mci's "play to N" timing has been unreliable in practice. Use
-      // async play + explicit Start-Sleep for deterministic capping.
+      // Capped playback: open + play + sleep for maxMs + close.
       return `
-$null = [W.MCI]::mciSendString('open "${psPath}" alias ${alias}', $null, 0, [IntPtr]::Zero)
-$null = [W.MCI]::mciSendString('play ${alias}', $null, 0, [IntPtr]::Zero)
+$p = New-Object System.Windows.Media.MediaPlayer
+$p.Open([uri]'${psPath}')
+$p.Play()
 Start-Sleep -Milliseconds ${Math.floor(it.maxMs)}
-$null = [W.MCI]::mciSendString('stop ${alias}', $null, 0, [IntPtr]::Zero)
-$null = [W.MCI]::mciSendString('close ${alias}', $null, 0, [IntPtr]::Zero)
+$p.Stop()
+$p.Close()
 `;
     }
+    // Uncapped playback: wait for MediaOpened to learn duration, then
+    // sleep for that long. MediaPlayer.NaturalDuration becomes valid
+    // shortly after Open() - poll briefly. Fallback to 8s if unknown.
     return `
-$null = [W.MCI]::mciSendString('open "${psPath}" alias ${alias}', $null, 0, [IntPtr]::Zero)
-$null = [W.MCI]::mciSendString('play ${alias} wait', $null, 0, [IntPtr]::Zero)
-$null = [W.MCI]::mciSendString('close ${alias}', $null, 0, [IntPtr]::Zero)
+$p = New-Object System.Windows.Media.MediaPlayer
+$p.Open([uri]'${psPath}')
+$deadline = (Get-Date).AddSeconds(3)
+while (-not $p.NaturalDuration.HasTimeSpan -and (Get-Date) -lt $deadline) {
+    Start-Sleep -Milliseconds 40
+}
+$secs = if ($p.NaturalDuration.HasTimeSpan) { [Math]::Ceiling($p.NaturalDuration.TimeSpan.TotalSeconds + 0.4) } else { 8 }
+$p.Play()
+Start-Sleep -Seconds $secs
+$p.Stop()
+$p.Close()
 `;
   }).join('');
   return `
 $ErrorActionPreference = 'SilentlyContinue'
-Add-Type -Name MCI -Namespace W -MemberDefinition '[System.Runtime.InteropServices.DllImport("winmm.dll", CharSet = System.Runtime.InteropServices.CharSet.Auto)] public static extern int mciSendString(string command, System.Text.StringBuilder buffer, int bufferSize, System.IntPtr hWndCallback);'
+Add-Type -AssemblyName PresentationCore
 ${lines}
 `;
 }
