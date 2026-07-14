@@ -175,6 +175,7 @@ public class WF {
   [DllImport("user32.dll")] public static extern int GetWindowTextLength(IntPtr h);
   [DllImport("user32.dll", CharSet=CharSet.Unicode)] public static extern int GetWindowText(IntPtr h, StringBuilder s, int n);
   [DllImport("user32.dll")] public static extern bool IsWindowVisible(IntPtr h);
+  [DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow();
   public static List<IntPtr> Find(string needle) {
     var hits = new List<IntPtr>();
     EnumWindows((h, l) => {
@@ -191,7 +192,18 @@ public class WF {
 }
 "@
 $hits = [WF]::Find('${target.replace(/'/g, "''")}')
-if ($hits.Count -gt 0) { $hits[0].ToInt64() } else { 0 }
+if ($hits.Count -eq 0) { 0 }
+elseif ($hits.Count -eq 1) { $hits[0].ToInt64() }
+else {
+  # Multiple windows match (e.g. several Chrome windows all end in "Google Chrome").
+  # Prefer the window currently in the foreground if it is among the matches, so the
+  # documented flow "raise/surface the target window, then speak --focus chrome" lands
+  # on the intended window instead of an arbitrary Z-order pick.
+  $fg = [WF]::GetForegroundWindow()
+  $inHits = $false
+  foreach ($h in $hits) { if ($h -eq $fg) { $inHits = $true; break } }
+  if ($inHits) { $fg.ToInt64() } else { $hits[0].ToInt64() }
+}
 `;
   try {
     const out = execFileSync(
