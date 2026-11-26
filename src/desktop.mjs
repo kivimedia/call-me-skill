@@ -53,14 +53,17 @@ export function getCurrentDesktop() {
 //
 // On any failure (PID has no MainWindowHandle, COM call throws, etc.) we
 // transparently fall back to getCurrentDesktop() so callers never break.
-const PS_CALLER = (pid) => `
+const PS_CALLER = (pid, forcedHwnd = 0) => `
 $ErrorActionPreference = 'Stop'
-$proc = Get-Process -Id ${pid} -ErrorAction SilentlyContinue
-if (-not $proc -or $proc.MainWindowHandle -eq 0) {
-  Write-Output '{"ok":false,"reason":"no-mainwindow"}'
-  exit 0
+$hwnd = [Int64]${forcedHwnd}
+if ($hwnd -eq 0) {
+  $proc = Get-Process -Id ${pid} -ErrorAction SilentlyContinue
+  if (-not $proc -or $proc.MainWindowHandle -eq 0) {
+    Write-Output '{"ok":false,"reason":"no-mainwindow"}'
+    exit 0
+  }
+  $hwnd = $proc.MainWindowHandle
 }
-$hwnd = $proc.MainWindowHandle
 Add-Type -TypeDefinition @"
 using System;
 using System.Runtime.InteropServices;
@@ -98,6 +101,24 @@ const CALLER_PID_VARS = ['CALL_ME_PID', 'VSCODE_PID', 'CURSOR_PID', 'ANTIGRAVITY
 export function getCallerDesktop() {
   let pid = null;
   let envSource = null;
+  // CALL_ME_HWND: an exact window handle (e.g. one of several VS Code windows that all
+  // share one VSCODE_PID). Wins over every PID variable.
+  const forcedHwnd = parseInt(process.env.CALL_ME_HWND || '', 10);
+  if (Number.isFinite(forcedHwnd) && forcedHwnd > 0) {
+    try {
+      const out = execFileSync(
+        'powershell.exe',
+        ['-NoProfile', '-NonInteractive', '-Command', PS_CALLER(0, forcedHwnd)],
+        { encoding: 'utf8', timeout: 10000 }
+      );
+      const result = JSON.parse(out.trim());
+      if (result.ok && result.index > 0) {
+        return { index: result.index, count: result.count, guid: result.guid, source: 'caller-hwnd:CALL_ME_HWND', hwnd: result.hwnd };
+      }
+    } catch {
+      // fall through to the PID variables
+    }
+  }
   for (const k of CALLER_PID_VARS) {
     const v = process.env[k];
     if (!v) continue;

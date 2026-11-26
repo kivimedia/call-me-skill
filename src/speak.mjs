@@ -51,6 +51,11 @@ export async function speak(message, opts = {}) {
     hwnd = findWindowHandle(opts.focus);
     focusUsed = hwnd ? `match for "${opts.focus}"` : `"${opts.focus}" not found, using foreground`;
   }
+  const forcedHwnd = parseInt(process.env.CALL_ME_HWND || '', 10);
+  if (!hwnd && Number.isFinite(forcedHwnd) && forcedHwnd > 0) {
+    hwnd = forcedHwnd;
+    focusUsed = 'CALL_ME_HWND';
+  }
   if (!hwnd) hwnd = getForegroundWindowHandle();
 
   ensureConfigDir();
