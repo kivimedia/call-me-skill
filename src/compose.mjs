@@ -33,10 +33,20 @@ function pickRandom(arr) {
   return Array.isArray(arr) ? arr[Math.floor(Math.random() * arr.length)] : arr;
 }
 
-function pickAddress(helperGender, userGender) {
+function pickAddress(helperGender, userGender, seed) {
   const map = ADDRESS_BY_GENDER[helperGender] || ADDRESS_BY_GENDER.neutral;
   const key = userGender?.startsWith('he') ? 'he' : userGender?.startsWith('she') ? 'she' : 'they';
-  return pickRandom(map[key]);
+  const arr = map[key];
+  if (seed !== undefined && Array.isArray(arr)) return arr[seed % arr.length];
+  return pickRandom(arr);
+}
+
+// Small stable hash, so --stable picks the same wording for the same message every time
+// (lets the TTS cache answer repeats for free).
+function seedOf(s) {
+  let h = 2166136261;
+  for (const ch of String(s)) h = Math.imul(h ^ ch.charCodeAt(0), 16777619) >>> 0;
+  return h;
 }
 
 function loadTemplates(helperGender, length) {
@@ -61,6 +71,7 @@ function loadTemplates(helperGender, length) {
  * @param {number} desktopIndex - 1-based current desktop
  * @param {object} [opts]
  * @param {string} [opts.lengthOverride] - short|medium|long override
+ * @param {boolean} [opts.stable] - same message + desktop = same wording (no random pick)
  * @returns {string}
  */
 export function compose(cfg, message, desktopIndex, opts = {}) {
@@ -68,8 +79,9 @@ export function compose(cfg, message, desktopIndex, opts = {}) {
   const helperGender = cfg.helper_gender || 'neutral';
   const userGender = cfg.your_gender || 'they/them';
   const templates = loadTemplates(helperGender, length);
-  const template = templates[Math.floor(Math.random() * templates.length)];
-  const address = pickAddress(helperGender, userGender);
+  const seed = opts.stable ? seedOf(`${message}|${desktopIndex}`) : undefined;
+  const template = seed !== undefined ? templates[seed % templates.length] : templates[Math.floor(Math.random() * templates.length)];
+  const address = pickAddress(helperGender, userGender, seed !== undefined ? Math.floor(seed / 7) : undefined);
   return template
     .replaceAll('{name}', cfg.name || 'friend')
     .replaceAll('{address}', address)
