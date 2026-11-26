@@ -40,7 +40,7 @@ export async function speak(message, opts = {}) {
   // that run on a different virtual desktop from whatever the human is looking at.
   // Falls back to getCurrentDesktop() if no PID env var is set (interactive CLI use).
   const desktop = getCallerDesktop();
-  const sentence = compose(cfg, message, desktop.index, { lengthOverride: opts.length, stable: !!opts.stable });
+  const sentence = compose(cfg, message, desktop.index, { lengthOverride: opts.length, stable: !!opts.stable, noDesktop: !!opts.noDesktop });
 
   // Save last-call state for the daemon hotkey.
   // window_handle: target for SetForegroundWindow when user hits the hotkey.

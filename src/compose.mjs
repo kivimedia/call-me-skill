@@ -29,6 +29,12 @@ const ADDRESS_BY_GENDER = {
   },
 };
 
+const NO_DESKTOP_TEMPLATES = [
+  '{name}, {address}, {message}.',
+  'Hey {name}, {message}.',
+  '{name}, {address}: {message}.',
+];
+
 function pickRandom(arr) {
   return Array.isArray(arr) ? arr[Math.floor(Math.random() * arr.length)] : arr;
 }
@@ -72,14 +78,16 @@ function loadTemplates(helperGender, length) {
  * @param {object} [opts]
  * @param {string} [opts.lengthOverride] - short|medium|long override
  * @param {boolean} [opts.stable] - same message + desktop = same wording (no random pick)
+ * @param {boolean} [opts.noDesktop] - leave out "calling from desktop N"
  * @returns {string}
  */
 export function compose(cfg, message, desktopIndex, opts = {}) {
   const length = opts.lengthOverride || cfg.sentence_length || 'medium';
   const helperGender = cfg.helper_gender || 'neutral';
   const userGender = cfg.your_gender || 'they/them';
-  const templates = loadTemplates(helperGender, length);
-  const seed = opts.stable ? seedOf(`${message}|${desktopIndex}`) : undefined;
+  // noDesktop: the caller already brings the window forward, so "calling from desktop N" is noise.
+  const templates = opts.noDesktop ? NO_DESKTOP_TEMPLATES : loadTemplates(helperGender, length);
+  const seed = opts.stable ? seedOf(`${message}|${opts.noDesktop ? '' : desktopIndex}`) : undefined;
   const template = seed !== undefined ? templates[seed % templates.length] : templates[Math.floor(Math.random() * templates.length)];
   const address = pickAddress(helperGender, userGender, seed !== undefined ? Math.floor(seed / 7) : undefined);
   return template
